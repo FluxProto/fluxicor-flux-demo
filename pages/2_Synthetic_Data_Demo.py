@@ -5,9 +5,9 @@ import pandas as pd
 import streamlit as st
 
 # --------------------------- Page setup -------------------------------------
-st.set_page_config(page_title="Synthetic Data Demo", layout="wide")
-st.title("🧪 Synthetic Telemetry Generator")
-st.caption("Generate realistic, shareable mock Bitcoin-mining telemetry for demos (no real hardware needed).")
+st.set_page_config(page_title="BTC Mining Data Demo", layout="wide")
+st.title("🧪 Telemetry Generator")
+st.caption("Generate realistic, shareable Bitcoin-mining telemetry for demos (no real hardware needed).")
 
 # --------------------------- Controls ---------------------------------------
 colA, colB, colC, colD = st.columns(4)
