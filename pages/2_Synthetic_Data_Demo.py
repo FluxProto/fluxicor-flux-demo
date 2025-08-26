@@ -5,7 +5,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Data Demo", layout="wide")
 st.title("🧪 Telemetry Generator")
-st.caption("Generate realistic, shareable mock Bitcoin-mining telemetry for demos (no real hardware needed).")
+st.caption("Generate, shareable compression telemetry for demos.")
 
 # ----- Controls
 colA, colB, colC, colD = st.columns(4)
