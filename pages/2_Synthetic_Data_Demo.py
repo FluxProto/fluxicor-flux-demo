@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Synthetic Data Demo", layout="wide")
-st.title("🧪 Synthetic Telemetry Generator")
+st.set_page_config(page_title="Data Demo", layout="wide")
+st.title("🧪 Telemetry Generator")
 st.caption("Generate realistic, shareable mock Bitcoin-mining telemetry for demos (no real hardware needed).")
 
 # ----- Controls
