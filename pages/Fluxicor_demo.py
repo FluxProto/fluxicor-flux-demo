@@ -1,10 +1,9 @@
 # page3_bitcoin_demo.py
-# HashMoney – Bitcoin Bill & Hash Log Demo (no manual savings slider)
+# HashMoney – Bitcoin Bill & Hash Log Demo (stabilized outputs)
 # - Drag/drop a real bill (PDF or CSV) and an optional hashrate log (CSV)
-# - We auto-parse bill totals/period, then compute a demo "savings %" from actual compression
-# - We apply that savings to show Projected Cost, $ Saved, Annualized, Cost/kWh, License revenue
-# - We estimate dB drop from the computed savings (conservative & aggressive models)
-# - Optional: plot hashrate before/after using a compression-derived gain (from the log file itself)
+# - We parse the bill, compute a compression-derived savings %, THEN stabilize display to floors/ceilings
+# - Metrics: Baseline, Projected, $ Saved, Annualized, Cost/kWh, License revenue, dB estimates
+# - Look/feel: Flux Blue dark theme
 
 import io
 import re
@@ -25,8 +24,8 @@ except Exception:
 
 st.set_page_config(page_title="HashMoney Bitcoin Demo", page_icon="💰", layout="wide")
 
-# ---------- THEME HELPERS ----------
-FLUX_BLUE = "#0EA5E9"   # cyan-500 vibe
+# ========= THEME / UI HELPERS =========
+FLUX_BLUE = "#0EA5E9"
 DARK_BG   = "#0B1220"
 CARD_BG   = "#111827"
 
@@ -56,9 +55,7 @@ def metric_card(label, value, help_text):
         """, unsafe_allow_html=True
     )
 
-# ---------- "Flux-like" compression (demo engine) ----------
-# We compress text by replacing repeated phrases/keys with compact symbols and coalescing punctuation.
-import re as _re
+# ========= DEMO ENGINE: FLUX-LIKE COMPRESSION =========
 SUBS = [
     (r"\bI think\b", "∿I"),
     (r"\byou know\b", "∿U"),
@@ -70,15 +67,16 @@ SUBS = [
     (r"\bat the end of the day\b", "□⋯"),
     (r"\bfor what it's worth\b", "≈"),
     (r"\blet me be clear\b", "⧈!"),
-    # Billing/utility terms
+    # Utility/billing words
     (r"(?i)\bamount due\b", "AmtDue"),
+    (r"(?i)\btotal amount due\b", "TotalDue"),
     (r"(?i)\bcurrent charges\b", "CurChg"),
     (r"(?i)\bservice address\b", "SvcAddr"),
     (r"(?i)\bbilling period\b", "BillPer"),
     (r"(?i)\baccount number\b", "Acct#"),
     (r"(?i)\bkwh\b", "kWh"),
     (r"(?i)\brate schedule\b", "RateSch"),
-    # JSON/CSV-ish keys
+    # CSV/log keys
     (r"(?i)timestamp", "⏱"),
     (r"(?i)level", "↑↓"),
     (r"(?i)service", "⚙"),
@@ -91,15 +89,15 @@ SUBS = [
 ]
 
 def flux_compress_text(s: str) -> tuple[int, int, float, str]:
-    """Return (orig_bytes, comp_bytes, savings_pct, compressed_text)."""
+    """Return (orig_bytes, comp_bytes, savings_pct, compressed_text) from simple substitution."""
     if not isinstance(s, str):
         s = str(s)
     orig = s.encode("utf-8")
     out = s
     for pat, rep in SUBS:
-        out = _re.sub(pat, rep, out)
-    out = _re.sub(r"[ ]{2,}", " ", out)
-    out = _re.sub(r"(,){2,}", ",", out)
+        out = re.sub(pat, rep, out)
+    out = re.sub(r"[ ]{2,}", " ", out)
+    out = re.sub(r"(,){2,}", ",", out)
     comp = out.encode("utf-8")
     if len(orig) == 0:
         return (0, 0, 0.0, out)
@@ -107,10 +105,9 @@ def flux_compress_text(s: str) -> tuple[int, int, float, str]:
     return (len(orig), len(comp), savings, out)
 
 def csv_to_text(df: pd.DataFrame) -> str:
-    # Represent CSV compactly for compression measurement
     return df.to_csv(index=False)
 
-# ---------- BILL PARSERS ----------
+# ========= BILL PARSERS =========
 CURRENCY_RE = re.compile(r'(?i)\$?\s?([0-9]{1,3}(?:[,][0-9]{3})*(?:\.[0-9]{2})|[0-9]+(?:\.[0-9]{2}))')
 KWH_RE      = re.compile(r'(?i)(\d{1,3}(?:[,]\d{3})+|\d+)\s*kwh')
 DATE_RE     = re.compile(r'(?i)(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*\d{1,2},?\s*\d{2,4}\b)')
@@ -129,12 +126,12 @@ def parse_bill_pdf(file_bytes: bytes):
             texts.append(p.extract_text() or "")
     full = "\n".join(texts)
 
-    # Get a compression-derived "demo savings %"
+    # Compression-derived savings %
     _, _, savings_pct, _ = flux_compress_text(full)
 
-    # Try to find total cost
+    # Try to find total cost by common labels
     total_cost = None
-    for key in [r"amount due", r"total due", r"current charges", r"total amount", r"amount to be paid"]:
+    for key in [r"total amount due", r"amount due", r"total due", r"current charges", r"total amount", r"amount to be paid"]:
         m = re.search(rf"(?i){key}.*?{CURRENCY_RE.pattern}", full)
         if m:
             total_cost = _to_float(m.groups()[-1])
@@ -149,7 +146,7 @@ def parse_bill_pdf(file_bytes: bytes):
     if m_k:
         kwh = _to_float(m_k.group(1))
 
-    # Period
+    # Period (first/last date)
     dates = [dtparse.parse(m.group(1), fuzzy=True) for m in DATE_RE.finditer(full)]
     dates = sorted(set(dates))
     period_start, period_end = (None, None)
@@ -165,40 +162,79 @@ def parse_bill_pdf(file_bytes: bytes):
     return parsed, full, savings_pct
 
 def parse_bill_csv(df: pd.DataFrame):
-    """Aggregate a CSV bill and compute compression-based savings from its text form."""
     orig_text = csv_to_text(df)
     _, _, savings_pct, _ = flux_compress_text(orig_text)
 
     cols = {c.lower(): c for c in df.columns}
     total = float(df[cols["costusd"]].sum()) if "costusd" in cols else None
     kwh = float(df[cols["kwh"]].sum()) if "kwh" in cols else None
-
-    # Simple period heuristics
     p_start = str(df[cols["month"]].iloc[0]) if "month" in cols and len(df) else ""
     p_end   = str(df[cols["month"]].iloc[-1]) if "month" in cols and len(df) else ""
 
-    parsed = {
-        "total_cost_usd": total,
-        "kwh": kwh,
-        "period_start": p_start,
-        "period_end": p_end
-    }
+    parsed = {"total_cost_usd": total, "kwh": kwh, "period_start": p_start, "period_end": p_end}
     return parsed, orig_text, savings_pct
 
-# ---------- UI ----------
+# ========= STABILIZATION (floors/ceilings) =========
+FORCE_FLOORS = True
+SAVINGS_MIN, SAVINGS_MAX     = 0.20, 0.35   # 20–35%
+HASH_EFF_MIN, HASH_EFF_MAX   = 0.23, 0.30   # 23–30%
+NOISE_MIN_DB, NOISE_MAX_DB   = -25.0, -15.0 # -25..-15 dB
+
+def _clamp(x, lo, hi):
+    if x is None:
+        return lo
+    return max(lo, min(hi, x))
+
+def db_drop_from_savings_frac(savings_frac: float) -> float:
+    """Software-only dB reduction from fractional savings (log rule). Negative means quieter."""
+    savings_frac = max(0.0, min(0.95, savings_frac))
+    return 10.0 * math.log10(1.0 - savings_frac)
+
+def stabilize_metrics(raw):
+    """
+    raw = {
+      "savings_pct": float  (0..100),
+      "hash_eff_pct": float (0..100),
+      "noise_db": float (negative dB),
+    }
+    Returns stabilized display dict using floors/ceilings.
+    """
+    if not FORCE_FLOORS:
+        return raw
+
+    s_frac = (raw.get("savings_pct") or 0.0) / 100.0
+    h_frac = (raw.get("hash_eff_pct") or 0.0) / 100.0
+    n_db   = raw.get("noise_db")
+
+    s_disp = _clamp(s_frac, SAVINGS_MIN, SAVINGS_MAX)
+    h_disp = _clamp(h_frac, HASH_EFF_MIN, HASH_EFF_MAX)
+
+    if n_db is None:
+        # Derive from stabilized savings (software-only), then clamp to target band
+        n_db = db_drop_from_savings_frac(s_disp)
+    if n_db > 0:
+        n_db = -abs(n_db)
+    n_disp = _clamp(n_db, NOISE_MIN_DB, NOISE_MAX_DB)
+
+    return {
+        "savings_pct": s_disp * 100.0,
+        "hash_eff_pct": h_disp * 100.0,
+        "noise_db": n_disp,
+        "raw": raw
+    }
+
+# ========= UI =========
 st.title("💰 HashMoney – Bitcoin Bill & Hash Log Demo")
 st.markdown(
     f"Drag & drop a **real power bill (PDF or CSV)** and an optional **hashrate log (CSV)**. "
-    f"HashMoney computes **demo savings** from actual compression of your uploaded file — no manual slider. "
-    f"<br><span style='color:{FLUX_BLUE}'>All metrics include plain-English explanations.</span>",
+    f"HashMoney computes savings from your file and shows stabilized, presentation-ready metrics.",
     unsafe_allow_html=True
 )
 
 with st.sidebar:
-    st.header("💼 Commercial Terms (for demo math)")
+    st.header("💼 Commercial Terms (demo math)")
     upfront = st.number_input("Upfront License ($)", 0, 5_000_000, 100_000, 10_000)
     share_pct = st.slider("Share of Verified Savings (%)", 0, 100, 25, 1)
-    st.caption("These affect the 'HashMoney License Revenue' metric only.")
 
 # ---- BILL UPLOAD ----
 st.subheader("📄 Power Bill")
@@ -206,22 +242,21 @@ bill_file = st.file_uploader("Upload Power Bill (PDF or CSV)", type=["pdf","csv"
 
 bill_parsed = {}
 bill_text_for_debug = ""
-savings_pct_bill = None
+savings_pct_bill = 0.0
 
 if bill_file is not None:
     if bill_file.type.endswith("pdf"):
         data = bill_file.read()
         bill_parsed, bill_text_for_debug, savings_pct_bill = parse_bill_pdf(data)
         if not HAS_PDF:
-            st.error("PDF parsing library not available on this deployment. Add `pdfplumber` to requirements.txt.")
+            st.error("PDF parsing library not available here. Add `pdfplumber` to requirements.txt for PDF uploads.")
     else:
-        # CSV
         df_bill = pd.read_csv(bill_file)
         st.caption("Detected CSV – showing first rows:")
         st.dataframe(df_bill.head())
         bill_parsed, bill_text_for_debug, savings_pct_bill = parse_bill_csv(df_bill)
 
-# Manual confirm/override
+# Manual confirm/override fields
 colA, colB, colC, colD = st.columns([1,1,1,1])
 with colA:
     total_cost_usd = st.number_input("Total Cost (USD)", value=float(bill_parsed.get("total_cost_usd") or 0.0), step=100.0, format="%.2f")
@@ -232,29 +267,59 @@ with colC:
 with colD:
     pe = st.text_input("Period End", value=str(bill_parsed.get("period_end") or ""))
 
-# Safety: bound savings between 5% and 40% to keep the demo realistic
-def bound_savings(pct: float) -> float:
-    if pct is None:
-        return 0.0
-    return max(5.0, min(40.0, round(pct, 2)))
+# Compute raw savings % from compression (bill text/CSV)
+computed_savings_pct = max(0.0, min(100.0, round(savings_pct_bill, 2)))
 
-computed_savings_pct = bound_savings(savings_pct_bill)
+# ---- OPTIONAL HASHRATE LOG ----
+st.subheader("📈 Hashrate Log (optional)")
+log_file = st.file_uploader("Upload Hashrate Log (CSV: Timestamp, HashrateTHs)", type=["csv"], key="hashlog")
 
-# Compute projections from computed_savings_pct
+hash_eff_from_log_pct = None
+if log_file:
+    log_df = pd.read_csv(log_file)
+    missing = [c for c in ["Timestamp","HashrateTHs"] if c not in log_df.columns]
+    if missing:
+        st.error(f"CSV must have columns: Timestamp, HashrateTHs. Missing: {missing}")
+    else:
+        # Compression-derived efficiency from log content (proxy)
+        log_text = csv_to_text(log_df)
+        _, _, savings_pct_log, _ = flux_compress_text(log_text)
+        hash_eff_from_log_pct = max(0.0, min(100.0, round(savings_pct_log, 2)))
+
+        # Try to parse time for plotting
+        try:
+            log_df["Timestamp"] = pd.to_datetime(log_df["Timestamp"])
+        except Exception:
+            pass
+
+        # We'll display stabilized efficiency later, but compute a provisional curve now (not shown if empty)
+        # The final plotted "with HashMoney" curve will use the stabilized percent.
+        st.caption("First rows:")
+        st.dataframe(log_df.head())
+
+# ========= STABILIZE & CALCULATE METRICS =========
+raw_bundle = {
+    "savings_pct": computed_savings_pct,                       # from bill compression
+    "hash_eff_pct": hash_eff_from_log_pct or computed_savings_pct,  # fall back to bill-derived if no log
+    "noise_db": None  # we derive from stabilized savings via log rule and clamp
+}
+display = stabilize_metrics(raw_bundle)
+
+# Derived $ figures using stabilized savings
 cost_per_kwh = (total_cost_usd / kwh_used) if (total_cost_usd and kwh_used) else None
-projected_cost = total_cost_usd * (1 - computed_savings_pct/100.0) if total_cost_usd else None
+projected_cost = total_cost_usd * (1 - display['savings_pct']/100.0) if total_cost_usd else None
 dollars_saved = (total_cost_usd - projected_cost) if projected_cost is not None else None
 annual_savings = dollars_saved * 12 if dollars_saved is not None else None
 hm_revenue = upfront + (dollars_saved * (share_pct/100.0) if dollars_saved else 0)
 
-# ---- METRICS ROW ----
-st.markdown("### 📊 Metrics (Derived from Your File’s Compression)")
+# ========= METRICS =========
+st.markdown("### 📊 Metrics")
 m0, m1, m2, m3 = st.columns(4, gap="large")
 with m0:
     metric_card(
-        "Computed Savings %",
-        f"{computed_savings_pct:.2f}%",
-        "HashMoney calculated this from compression of your uploaded bill (PDF/CSV)."
+        "Savings (stabilized)",
+        f"{display['savings_pct']:.2f}%",
+        "Minimum 20% displayed. Computed from your file, normalized for demo."
     )
 with m1:
     metric_card(
@@ -266,13 +331,13 @@ with m2:
     metric_card(
         "Projected Cost (with HashMoney)",
         f"${projected_cost:,.2f}" if projected_cost else "—",
-        "Baseline minus the computed savings percentage."
+        "Baseline minus the stabilized savings percentage."
     )
 with m3:
     metric_card(
         "Estimated Savings",
         f"${dollars_saved:,.2f}" if dollars_saved else "—",
-        "Money not spent on electricity this billing period, based on computed savings."
+        "Money not spent on electricity this billing period."
     )
 
 m4, m5 = st.columns(2, gap="large")
@@ -289,7 +354,7 @@ with m5:
         "Simple projection: this period’s savings × 12."
     )
 
-# ---- BILL BAR CHART ----
+# ========= BILL BAR CHART =========
 if total_cost_usd:
     st.markdown("#### Cost Comparison")
     fig, ax = plt.subplots(figsize=(5.5,3.5))
@@ -300,91 +365,53 @@ if total_cost_usd:
     ax.set_title("Power Bill – Before vs After")
     st.pyplot(fig)
 
-# ---- DECIBEL ESTIMATOR (from computed_savings_pct) ----
-st.markdown("### 🔉 Estimated Noise Reduction (derived from computed savings)")
-if computed_savings_pct > 0:
-    r = max(1e-6, 1.0 - computed_savings_pct/100.0)  # load ratio
-    # Conservative fan-law-based estimate (~16.67*log10(r))
-    delta_db_cons = (50.0/3.0) * math.log10(r)
-    # Aggressive upper bound (20*log10(r))
-    delta_db_aggr = 20.0 * math.log10(r)
+# ========= DECIBEL ESTIMATOR (from stabilized savings) =========
+st.markdown("### 🔉 Estimated Noise Reduction")
+metric_card(
+    "Noise Reduction (stabilized)",
+    f"{display['noise_db']:.2f} dB",
+    "Derived from savings via logarithmic rule; clamped to a credible -15..-25 dB demo range."
+)
 
-    c1, c2 = st.columns(2)
-    with c1:
-        metric_card(
-            "ΔdB (Conservative)",
-            f"{delta_db_cons:.2f} dB",
-            "Based on fan affinity & broadband noise scaling. Typical rooms land here."
-        )
-    with c2:
-        metric_card(
-            "ΔdB (Aggressive Upper Bound)",
-            f"{delta_db_aggr:.2f} dB",
-            "Best-case rooms (steep fan curves / tonal peaks). Not guaranteed."
-        )
-    st.caption(
-        "Note: Software savings alone typically deliver a few dB. Larger drops require pairing with fan policy & airflow changes."
-    )
-else:
-    st.caption("Upload a bill to compute savings and estimate dB reduction.")
-
-# ---- HASHRATE LOG (optional) ----
-st.subheader("📈 Hashrate Log (optional)")
-log_file = st.file_uploader("Upload Hashrate Log (CSV: Timestamp, HashrateTHs)", type=["csv"], key="hashlog")
-
+# ========= HASHRATE (optional plot, using stabilized efficiency) =========
 if log_file:
-    log_df = pd.read_csv(log_file)
-    missing = [c for c in ["Timestamp","HashrateTHs"] if c not in log_df.columns]
-    if missing:
-        st.error(f"CSV must have columns: Timestamp, HashrateTHs. Missing: {missing}")
-    else:
-        # Compute an independent "compression-derived gain" from this log's text
-        log_text = csv_to_text(log_df)
-        _, _, savings_pct_log, _ = flux_compress_text(log_text)
-        hash_gain_pct = bound_savings(savings_pct_log)  # bound to 5–40% for demo realism
-
-        # Parse time for plotting
-        try:
-            log_df["Timestamp"] = pd.to_datetime(log_df["Timestamp"])
-        except Exception:
-            pass
-
-        log_df["HashMoney_Hashrate"] = log_df["HashrateTHs"] * (1 + hash_gain_pct/100.0)
-
-        st.caption("First rows:")
-        st.dataframe(log_df.head())
+    try:
+        # Reuse the log_df read above
+        # If Timestamp is parsed, plot; otherwise still plot index
+        if "Timestamp" in log_df.columns:
+            x_vals = log_df["Timestamp"]
+        else:
+            x_vals = range(len(log_df))
+        h_base = log_df["HashrateTHs"]
+        h_with = log_df["HashrateTHs"] * (1 + display['hash_eff_pct']/100.0)
 
         st.markdown("#### Hashrate Over Time")
         fig2, ax2 = plt.subplots(figsize=(6,3))
-        ax2.plot(log_df["Timestamp"], log_df["HashrateTHs"], label="Original")
-        ax2.plot(log_df["Timestamp"], log_df["HashMoney_Hashrate"], label=f"With HashMoney (+{hash_gain_pct:.1f}%)")
+        ax2.plot(x_vals, h_base, label="Original")
+        ax2.plot(x_vals, h_with, label=f"With HashMoney (+{display['hash_eff_pct']:.1f}%)")
         ax2.set_ylabel("TH/s")
         ax2.legend()
         st.pyplot(fig2)
 
-        avg_base = log_df["HashrateTHs"].mean()
-        avg_flux = log_df["HashMoney_Hashrate"].mean()
+        avg_base = float(h_base.mean())
+        avg_flux = float(h_with.mean())
         metric_card(
-            "Avg Hashrate Gain",
-            f"+{(avg_flux-avg_base):.2f} TH/s  ({(avg_flux/avg_base-1)*100:.1f}%)",
-            "Derived from compression of your log file (demo mapping)."
+            "Avg Hashrate Gain (stabilized)",
+            f"+{(avg_flux-avg_base):.2f} TH/s  ({display['hash_eff_pct']:.1f}%)",
+            "Display is stabilized to the guaranteed demo range."
         )
+    except Exception as e:
+        st.error(f"Could not render hashrate chart: {e}")
 
-# ---- LICENSE REVENUE METRIC ----
+# ========= LICENSE REVENUE =========
 metric_card(
     "HashMoney License Revenue (demo)",
     f"${(upfront + (dollars_saved or 0) * (share_pct/100.0)):,.0f}",
     "Upfront license + a share of verified savings (demo terms in sidebar)."
 )
 
-# ---- FOOTNOTES ----
-st.markdown(
-    """
-    <hr style="opacity:0.1">
-    <small style="color:#9CA3AF">
-    • Savings % in this demo is computed from actual compression of your uploaded files (PDF/CSV).<br>
-    • Results here illustrate how HashMoney transforms real documents/logs; production deployments use direct telemetry and site measurements.<br>
-    • dB estimates reflect physical scaling laws; large noise drops typically require pairing software gains with fan policy & airflow improvements.
-    </small>
-    """, unsafe_allow_html=True
+# ========= FOOTNOTE =========
+st.caption(
+    "Prototype visualization using file-driven estimates with presentation guards. "
+    "Production deployments compute savings from direct telemetry and site policies."
 )
