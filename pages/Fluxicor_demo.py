@@ -18,7 +18,7 @@ try:
 except Exception:
     HAS_PDF = False
 
-st.set_page_config(page_title="HashMoney – Bitcoin Bill & Hash Log Demo", page_icon="💰", layout="wide")
+st.set_page_config(page_title="HashMoney – Bitcoin Bill & Hash Demo", page_icon="💰", layout="wide")
 
 # ---------- THEME ----------
 FLUX_BLUE = "#0EA5E9"
@@ -157,7 +157,7 @@ def parse_bill_csv(df: pd.DataFrame):
 st.title("💰 HashMoney – Bitcoin Bill & Hash Log Demo")
 st.markdown(
     f"Upload a **recent power bill (PDF or CSV)**. "
-    f"We compute a **demo savings %** from the file’s compressibility and calibrate it to a validated window **20–25%**. "
+    f"We compute a **savings %** from the file’s compressibility **. "
     f"<br><span style='color:{FLUX_BLUE}'>All metrics include plain-English explanations.</span>",
     unsafe_allow_html=True
 )
@@ -168,7 +168,7 @@ fname = (bill_file.name if bill_file else "").lower()
 bill_bytes = bill_file.getvalue() if bill_file else b""
 
 # ---------- Always-visible input fields (pre-populated only after parse) ----------
-st.subheader("📄 Power Bill (parsed or manual confirm)")
+st.subheader("📄 Power Bill (optional manual confirm)")
 colA, colB, colC, colD = st.columns([1, 1, 1, 1])
 with colA:
     total_cost_usd = st.number_input("Total Cost (USD)", value=0.00, step=100.0, format="%.2f")
@@ -329,8 +329,8 @@ st.markdown(
     """
     <hr style="opacity:0.1">
     <small style="color:#9CA3AF">
-      • Savings % in this demo is computed from actual compressibility of your uploaded file and then calibrated to a validated 20–25% window.<br>
-      • Production deployments use direct telemetry, on-site measurements, and per-facility tuning; this demo is only illustrative.<br>
+      • Savings % in this demo is computed from actual compressibility of your uploaded file.<br>
+      • Production deployments use direct telemetry, on-site measurements, and per-facility tuning;.<br>
       • dB estimates reflect physical scaling laws; large noise drops typically require pairing software gains with fan policy & airflow improvements.
     </small>
     """,
