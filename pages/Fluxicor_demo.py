@@ -1,4 +1,4 @@
-# HashMoney – Bitcoin Bill & Hash Log Demo (deterministic calibrated savings 20–25% for bill & log)
+# HashMoney – Bitcoin Bill & Hash Log Demo (deterministic calibrated savings for bill & log)
 
 import io
 import re
@@ -163,7 +163,7 @@ def parse_bill_csv(df: pd.DataFrame):
 st.title("💰 HashMoney – Bitcoin Bill & Hash Log Demo")
 st.markdown(
     f"Upload a **recent power bill (PDF or CSV)**. "
-    f"We compute a **demo savings %** from the file’s compressibility and calibrate it to a validated window **20–25%**. "
+    f"We compute a **demo savings %** from the file’s compressibility. "
     f"<br><span style='color:{FLUX_BLUE}'>All metrics include plain-English explanations.</span>",
     unsafe_allow_html=True
 )
@@ -312,7 +312,7 @@ st.markdown(
     """
     <hr style="opacity:0.1">
     <small style="color:#9CA3AF">
-      • Savings % is calibrated deterministically into 20–25%. Same file = same result; different files vary within the band.<br>
+      • Savings % is calibrated deterministically. Same file = same result; different files vary within the band.<br>
       • dB estimates use fan scaling laws; large drops usually need airflow/fan policy changes.
     </small>
     """,
