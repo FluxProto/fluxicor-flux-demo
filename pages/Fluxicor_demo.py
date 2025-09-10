@@ -233,7 +233,7 @@ if bill_file:
     with colD:
         pe = st.text_input("Period End", value=str(st.session_state["pe"]))
 
-    # Map raw compressibility to calibrated 20–25%
+    # Map raw compressibility to calibrated FLux value
     computed_savings_pct = calibrated_window(raw_pct, 20.0, 25.0)
 
     # Derived dollars
