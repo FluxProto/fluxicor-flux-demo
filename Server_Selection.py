@@ -5,7 +5,7 @@ from flux_compress import flux_compress_text, estimate_savings, DEFAULT_SYMBOL_M
 
 st.set_page_config(page_title="Flux Compression Demo", page_icon="⚡", layout="wide")
 
-st.title("Flux Compression Demo")
+st.title("Flux Server Demo")
 st.markdown("""
 <div style="display:flex;align-items:center;gap:14px;margin:-10px 0 10px 0;">
   <div style="width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,#00e5ff 0%,#6fffd2 100%);display:flex;align-items:center;justify-content:center;">
